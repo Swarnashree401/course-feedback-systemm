@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Course Feedback - Frontend</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body{font-family:system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial;padding:20px;background:#f3f4f6}
+      .card{background:#fff;padding:16px;border-radius:8px;max-width:900px;margin:12px auto;box-shadow:0 2px 6px rgba(0,0,0,0.08)}
+      input,select,textarea{width:100%;padding:8px;margin-top:6px;margin-bottom:12px;border:1px solid #ddd;border-radius:6px}
+      button{padding:8px 12px;border:none;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer}
+      .muted{color:#6b7280;font-size:14px}
+      .row{display:flex;gap:12px}
+      .col{flex:1}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Course Feedback (Static Frontend)</h1>
+      <div id="app">
+        <p class="muted">This is a simple single-file frontend that works without build. It talks to <strong>http://localhost:5000/api</strong>.</p>
+
+        <section id="auth" style="margin-top:12px">
+          <h2>Login</h2>
+          <input id="loginEmail" placeholder="Email" value="admin@example.com"/>
+          <input id="loginPassword" placeholder="Password" type="password" value="Admin@1234"/>
+          <button onclick="login()">Login</button>
+          <div id="loginMsg" class="muted"></div>
+        </section>
+
+        <section id="main" style="display:none;margin-top:18px">
+          <h2>Submit Feedback</h2>
+          <div id="userInfo" class="muted"></div>
+          <select id="courseSelect"></select>
+          <select id="ratingSelect">
+            <option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option>
+          </select>
+          <textarea id="message" placeholder="Message (optional)"></textarea>
+          <button onclick="submitFeedback()">Submit Feedback</button>
+
+          <h3 style="margin-top:18px">My Feedbacks</h3>
+          <div id="myFeedbacks"></div>
+
+          <h3 style="margin-top:18px">Admin Actions</h3>
+          <button onclick="exportCsv()">Export CSV (admin)</button>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const API = (window.API_BASE = 'http://localhost:5000/api');
+      function setMsg(el, txt){ document.getElementById(el).innerText = txt; }
+      async function login(){
+        setMsg('loginMsg','Logging in...');
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+        try{
+          const res = await fetch(API + '/auth/login', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({email,password})});
+          const data = await res.json();
+          if(!res.ok) { setMsg('loginMsg', data.message||'Login failed'); return; }
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          setMsg('loginMsg','Login successful');
+          showMain();
+        }catch(e){ setMsg('loginMsg','Network error'); }
+      }
+      async function fetchCourses(){
+        const t = localStorage.getItem('token');
+        const res = await fetch(API + '/courses', { headers: { Authorization: 'Bearer ' + t }});
+        if(!res.ok) return [];
+        return res.json();
+      }
+      async function showMain(){
+        document.getElementById('auth').style.display='none';
+        document.getElementById('main').style.display='block';
+        const user = JSON.parse(localStorage.getItem('user')||'null');
+        document.getElementById('userInfo').innerText = user ? (user.name + ' ('+user.email+')') : '';
+        const courses = await fetchCourses();
+        const sel = document.getElementById('courseSelect');
+        sel.innerHTML = '';
+        (courses || []).forEach(c => {
+          const opt = document.createElement('option'); opt.value = c.id; opt.text = c.title; sel.appendChild(opt);
+        });
+        loadMyFeedbacks();
+      }
+      async function submitFeedback(){
+        const t = localStorage.getItem('token');
+        const courseId = document.getElementById('courseSelect').value;
+        const rating = document.getElementById('ratingSelect').value;
+        const message = document.getElementById('message').value;
+        const res = await fetch(API + '/feedback', { method:'POST', headers:{'content-type':'application/json', Authorization:'Bearer '+t}, body:JSON.stringify({courseId, rating, message})});
+        if(res.ok){ alert('Submitted'); loadMyFeedbacks(); document.getElementById('message').value=''; }
+        else { const d=await res.json(); alert(d.message||'Error'); }
+      }
+      async function loadMyFeedbacks(){
+        const t = localStorage.getItem('token');
+        const res = await fetch(API + '/feedback/me', { headers:{ Authorization: 'Bearer '+t }});
+        const data = await res.json();
+        const container = document.getElementById('myFeedbacks');
+        container.innerHTML = '';
+        (data.items || []).forEach(f => {
+          const div = document.createElement('div'); div.style.padding='8px'; div.style.border='1px solid #eee'; div.style.marginBottom='8px';
+          div.innerHTML = '<strong>'+ (f.course?.title||'') +'</strong><div>Rating: '+f.rating+'</div><div>'+ (f.message||'') +'</div><button onclick="deleteFb(\''+f.id+'\')">Delete</button>';
+          container.appendChild(div);
+        });
+      }
+      async function deleteFb(id){
+        const t = localStorage.getItem('token');
+        const res = await fetch(API + '/feedback/' + id, { method:'DELETE', headers:{ Authorization: 'Bearer '+t }});
+        if(res.ok) loadMyFeedbacks();
+        else { const d=await res.json(); alert(d.message||'Error'); }
+      }
+      async function exportCsv(){
+        const t = localStorage.getItem('token');
+        const res = await fetch(API + '/feedback/export/csv', { headers:{ Authorization: 'Bearer '+t }});
+        if(res.ok){
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = 'feedback_export.csv'; document.body.appendChild(a); a.click(); a.remove();
+        } else { const d=await res.json(); alert(d.message||'Error'); }
+      }
+
+      // auto-show main if already logged in
+      if(localStorage.getItem('token')) showMain();
+    </script>
+  </body>
+</html>
